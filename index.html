@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PolyRun</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+<style>
+  :root {
+    --bg: #111317; --panel: #181b21; --panel-2: #1f232b; --line: #2a2f39;
+    --text: #e6e8ec; --muted: #8b93a3; --accent: #5aa9ff; --accent-ink: #06121f;
+    --ok: #4ccf8a; --err: #ff6b6b; --warn: #f5b84a;
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line);
+           background: var(--panel); flex-wrap: wrap; }
+  .logo { font-weight: 700; letter-spacing: .3px; font-size: 16px; margin-right: 4px; }
+  .logo span { color: var(--accent); }
+  select, button, textarea { font: inherit; color: inherit; }
+  select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 230px; }
+  button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: #3b4250; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.primary:disabled { opacity: .5; cursor: default; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 6px 10px; background: transparent; color: var(--muted); }
+  .seg button.on { background: var(--panel-2); color: var(--text); }
+  .chip { font-size: 12px; color: var(--muted); padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+  .chip.ok { color: var(--ok); border-color: #24563d; }
+  .chip.warn { color: var(--warn); border-color: #5c4920; }
+  .chip.err { color: var(--err); border-color: #5c2a2a; }
+  .spacer { flex: 1; }
+  .kbd { font-size: 12px; color: var(--muted); }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .col + .col { border-left: 1px solid var(--line); }
+  .tabs { display: flex; gap: 2px; padding: 6px 8px 0; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 36px; align-items: flex-end; }
+  .tab { padding: 6px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; color: var(--muted); cursor: pointer; background: none; font-size: 13px; }
+  .tab.on { background: #212121; color: var(--text); border-color: var(--line); }
+  .tab .fname { font-family: var(--mono); font-size: 12px; }
+  .editor-wrap { flex: 1; min-height: 0; position: relative; }
+  .CodeMirror { height: 100%; font-family: var(--mono); font-size: 14px; }
+  .notice { margin: 10px; padding: 10px 12px; border: 1px solid #5c4920; background: #241e12; color: #f1d9a6; border-radius: 6px; font-size: 13px; }
+  .notice code { font-family: var(--mono); background: #00000040; padding: 1px 5px; border-radius: 4px; user-select: all; }
+  .section-h { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 12px; text-transform: uppercase;
+               letter-spacing: .6px; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--line); }
+  .section-h button { padding: 2px 8px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+  #stdin { height: 90px; resize: vertical; background: var(--bg); border: 0; border-bottom: 1px solid var(--line); padding: 8px 12px; font-family: var(--mono); font-size: 13px; outline: none; }
+  #output { flex: 1; margin: 0; padding: 10px 12px; overflow: auto; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+  #output .stderr { color: var(--err); }
+  #output .info { color: var(--muted); }
+  #output .okline { color: var(--ok); }
+  #preview { flex: 1.4; border: 0; background: #fff; width: 100%; min-height: 0; border-bottom: 1px solid var(--line); }
+  .hidden { display: none !important; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: minmax(320px, 1fr) minmax(320px, 1fr); }
+    .col + .col { border-left: 0; border-top: 1px solid var(--line); }
+    select { min-width: 0; flex: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Poly<span>Run</span></div>
+  <select id="lang" aria-label="Language"></select>
+  <div class="seg hidden" id="engineSeg" role="group" aria-label="Where to run">
+    <button data-engine="local">This computer</button>
+    <button data-engine="browser">Browser</button>
+  </div>
+  <span class="chip" id="status">Loading…</span>
+  <div class="spacer"></div>
+  <span class="kbd">Ctrl+Enter to run</span>
+  <button id="resetBtn" title="Replace the code with the example">Reset example</button>
+  <button class="primary" id="runBtn">▶ Run</button>
+</header>
+
+<main>
+  <section class="col">
+    <div class="tabs" id="tabs"></div>
+    <div id="notice" class="notice hidden"></div>
+    <div class="editor-wrap"><textarea id="code"></textarea></div>
+  </section>
+  <section class="col">
+    <iframe id="preview" class="hidden" title="Web page preview" sandbox="allow-scripts allow-modals allow-forms"></iframe>
+    <div class="section-h" id="stdinHead"><span>Input (stdin)</span></div>
+    <textarea id="stdin" spellcheck="false" placeholder="Text your program reads from input…"></textarea>
+    <div class="section-h"><span id="outTitle">Output</span><button id="clearBtn">Clear</button></div>
+    <pre id="output"></pre>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/comment/comment.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/xml-fold.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closetag.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchtags.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/go/go.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/rust/rust.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/ruby/ruby.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/php/php.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/perl/perl.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/r/r.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/julia/julia.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/haskell/haskell.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/swift/swift.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/dart/dart.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/powershell/powershell.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/vb/vb.min.js"></script>
+<script>
+"use strict";
+// ---------------------------------------------------------------- languages
+// browser: which in-browser runtime can run it when no local toolchain exists.
+const LANGS = [
+  { id: "web", name: "HTML + CSS + JavaScript (web page)", group: "Web", browser: "web" },
+  { id: "javascript", name: "JavaScript", group: "Popular", mode: "text/javascript", file: "main.js", browser: "js", stdin: "" ,
+    sample: `// readline() reads a line of input when running in the browser
+const nums = [1, 2, 3, 4, 5];
+console.log("Hello from JavaScript!");
+console.log("Squares:", nums.map(n => n * n).join(", "));
+` },
+  { id: "typescript", name: "TypeScript", group: "Popular", mode: "text/typescript", file: "main.ts", browser: "ts",
+    sample: `interface Point { x: number; y: number }
+
+const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
+console.log("Hello from TypeScript!");
+console.log("Distance:", dist({ x: 0, y: 0 }, { x: 3, y: 4 }));
+` },
+  { id: "python", name: "Python", group: "Popular", mode: "text/x-python", file: "main.py", browser: "python", stdin: "World",
+    sample: `name = input("What's your name? ")
+print(f"Hello, {name}!")
+print("Squares:", [n * n for n in range(1, 6)])
+` },
+  { id: "lua", name: "Lua", group: "Popular", mode: "text/x-lua", file: "main.lua", browser: "lua", stdin: "World",
+    sample: `local name = io.read()
+print("Hello, " .. (name or "Lua") .. "!")
+
+local squares = {}
+for i = 1, 5 do squares[#squares + 1] = i * i end
+print("Squares: " .. table.concat(squares, ", "))
+` },
+  { id: "c", name: "C", group: "Compiled", mode: "text/x-csrc", file: "main.c",
+    sample: `#include <stdio.h>
+
+int main(void) {
+    printf("Hello from C!\\n");
+    for (int i = 1; i <= 5; i++) printf("%d ", i * i);
+    printf("\\n");
+    return 0;
+}
+` },
+  { id: "cpp", name: "C++", group: "Compiled", mode: "text/x-c++src", file: "main.cpp", stdin: "World",
+    sample: `#include <iostream>
+#include <string>
+#include <vector>
+
+int main() {
+    std::string name;
+    std::getline(std::cin, name);
+    std::cout << "Hello, " << name << "!\\n";
+
+    std::vector<int> v{1, 2, 3, 4, 5};
+    for (int n : v) std::cout << n * n << ' ';
+    std::cout << '\\n';
+}
+` },
+  { id: "csharp", name: "C#", group: "Compiled", mode: "text/x-csharp", file: "main.cs", stdin: "World",
+    sample: `using System;
+using System.Linq;
+
+class Program
+{
+    static void Main()
+    {
+        string name = Console.ReadLine();
+        Console.WriteLine("Hello, " + name + "!");
+        var squares = Enumerable.Range(1, 5).Select(n => n * n);
+        Console.WriteLine("Squares: " + string.Join(", ", squares));
+    }
+}
+` },
+  { id: "java", name: "Java", group: "Compiled", mode: "text/x-java", file: "Main.java", stdin: "World",
+    sample: `import java.util.Scanner;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner in = new Scanner(System.in);
+        String name = in.hasNextLine() ? in.nextLine() : "Java";
+        System.out.println("Hello, " + name + "!");
+        for (int i = 1; i <= 5; i++) System.out.print(i * i + " ");
+        System.out.println();
+    }
+}
+` },
+  { id: "xpp", name: "X++ (Dynamics 365)", group: "Compiled", mode: "text/x-csharp", file: "HelloWorld.xpp",
+    sample: `// X++ only compiles inside Dynamics 365 Finance & Operations.
+class HelloWorld
+{
+    public static void main(Args _args)
+    {
+        int i;
+        info("Hello from X++!");
+        for (i = 1; i <= 5; i++)
+        {
+            info(strFmt("%1 squared is %2", i, i * i));
+        }
+    }
+}
+` },
+  { id: "go", name: "Go", group: "Compiled", mode: "text/x-go", file: "main.go",
+    sample: `package main
+
+import "fmt"
+
+func main() {
+	fmt.Println("Hello from Go!")
+	for i := 1; i <= 5; i++ {
+		fmt.Print(i*i, " ")
+	}
+	fmt.Println()
+}
+` },
+  { id: "rust", name: "Rust", group: "Compiled", mode: "text/x-rustsrc", file: "main.rs",
+    sample: `fn main() {
+    println!("Hello from Rust!");
+    let squares: Vec<i32> = (1..=5).map(|n| n * n).collect();
+    println!("Squares: {:?}", squares);
+}
+` },
+  { id: "kotlin", name: "Kotlin", group: "Compiled", mode: "text/x-kotlin", file: "main.kt",
+    sample: `fun main() {
+    println("Hello from Kotlin!")
+    println("Squares: " + (1..5).map { it * it })
+}
+` },
+  { id: "swift", name: "Swift", group: "Compiled", mode: "text/x-swift", file: "main.swift",
+    sample: `print("Hello from Swift!")
+print("Squares:", (1...5).map { $0 * $0 })
+` },
+  { id: "vbnet", name: "Visual Basic .NET", group: "Compiled", mode: "text/x-vb", file: "main.vb",
+    sample: `Module Program
+    Sub Main()
+        Console.WriteLine("Hello from VB.NET!")
+        For i As Integer = 1 To 5
+            Console.Write((i * i).ToString() & " ")
+        Next
+        Console.WriteLine()
+    End Sub
+End Module
+` },
+  { id: "dart", name: "Dart", group: "Compiled", mode: "application/dart", file: "main.dart",
+    sample: `void main() {
+  print('Hello from Dart!');
+  print('Squares: \${[for (var i = 1; i <= 5; i++) i * i]}');
+}
+` },
+  { id: "haskell", name: "Haskell", group: "Compiled", mode: "text/x-haskell", file: "main.hs",
+    sample: `main :: IO ()
+main = do
+  putStrLn "Hello from Haskell!"
+  print [n * n | n <- [1 .. 5]]
+` },
+  { id: "ruby", name: "Ruby", group: "Scripting", mode: "text/x-ruby", file: "main.rb",
+    sample: `puts "Hello from Ruby!"
+puts "Squares: #{(1..5).map { |n| n * n }.join(', ')}"
+` },
+  { id: "php", name: "PHP", group: "Scripting", mode: "text/x-php", file: "main.php",
+    sample: `<?php
+echo "Hello from PHP!\\n";
+echo "Squares: " . implode(", ", array_map(fn($n) => $n * $n, range(1, 5))) . "\\n";
+` },
+  { id: "perl", name: "Perl", group: "Scripting", mode: "text/x-perl", file: "main.pl",
+    sample: `use strict;
+use warnings;
+print "Hello from Perl!\\n";
+print "Squares: ", join(", ", map { $_ * $_ } 1..5), "\\n";
+` },
+  { id: "r", name: "R", group: "Scripting", mode: "text/x-rsrc", file: "main.R",
+    sample: `cat("Hello from R!\\n")
+x <- 1:5
+print(x^2)
+` },
+  { id: "julia", name: "Julia", group: "Scripting", mode: "text/x-julia", file: "main.jl",
+    sample: `println("Hello from Julia!")
+println("Squares: ", [n^2 for n in 1:5])
+` },
+  { id: "sql", name: "SQL (SQLite)", group: "Scripting", mode: "text/x-sql", file: "main.sql",
+    sample: `CREATE TABLE langs (name TEXT, year INTEGER);
+INSERT INTO langs VALUES ('C', 1972), ('Python', 1991), ('Lua', 1993), ('Java', 1995), ('C#', 2000);
+
+SELECT name, year FROM langs WHERE year > 1990 ORDER BY year;
+SELECT COUNT(*) AS total FROM langs;
+` },
+  { id: "bash", name: "Bash", group: "Shell", mode: "text/x-sh", file: "main.sh",
+    sample: `echo "Hello from Bash!"
+for i in 1 2 3 4 5; do printf "%d " $((i * i)); done
+echo
+` },
+  { id: "powershell", name: "PowerShell", group: "Shell", mode: "application/x-powershell", file: "main.ps1",
+    sample: `Write-Output "Hello from PowerShell!"
+$squares = 1..5 | ForEach-Object { $_ * $_ }
+Write-Output ("Squares: " + ($squares -join ", "))
+` },
+  { id: "batch", name: "Batch (cmd)", group: "Shell", mode: "text/plain", file: "main.bat",
+    sample: `@echo off
+echo Hello from Batch!
+for /L %%i in (1,1,5) do echo %%i
+` },
+];
+
+const WEB_SAMPLE = {
+  html: `<!doctype html>
+<html>
+<body>
+  <h1>Hello from HTML!</h1>
+  <p>Edit the HTML, CSS and JS tabs — the preview updates as you type.</p>
+  <button id="btn">Click me</button>
+  <p id="count">Clicked 0 times</p>
+</body>
+</html>
+`,
+  css: `body {
+  font-family: system-ui, sans-serif;
+  padding: 24px;
+  background: #f4f6fb;
+  color: #1d2433;
+}
+h1 { color: #2563eb; }
+button {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+`,
+  js: `let clicks = 0;
+document.getElementById("btn").addEventListener("click", () => {
+  clicks++;
+  document.getElementById("count").textContent = "Clicked " + clicks + " times";
+  console.log("clicked", clicks);
+});
+`,
+};
+const WEB_TABS = [
+  { key: "html", label: "index.html", mode: "htmlmixed" },
+  { key: "css", label: "style.css", mode: "css" },
+  { key: "js", label: "script.js", mode: "text/javascript" },
+];
+
+const URLS = {
+  ts: "https://cdnjs.cloudflare.com/ajax/libs/typescript/5.4.5/typescript.min.js",
+  pyodide: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+  fengari: "https://cdn.jsdelivr.net/npm/fengari-web@0.1.4/dist/fengari-web.js",
+};
+const BROWSER_TIMEOUT_MS = 10000;
+
+// ---------------------------------------------------------------- state
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem("polyrun:" + k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem("polyrun:" + k, v); } catch {} },
+};
+let server = null;            // { id: {available, via, hint} } or null when no local server
+let current = null;           // current language object
+let webTab = "html";
+let engineChoice = {};        // lang id -> "local" | "browser"
+const docs = {};              // key -> CodeMirror.Doc
+const workers = {};           // browser runtime workers by kind
+let running = false;
+
+const cm = CodeMirror.fromTextArea($("code"), {
+  theme: "material-darker", lineNumbers: true, indentUnit: 4, tabSize: 4,
+  matchBrackets: true, autoCloseBrackets: true,
+  // Typing <html> inserts </html>; typing </ completes the open tag's name.
+  // Block tags (html, body, div, ul…) put the cursor on an indented line between them.
+  autoCloseTags: { whenOpening: true, whenClosing: true,
+    indentTags: ["html", "head", "body", "div", "section", "article", "aside", "nav", "header", "footer", "main",
+                 "ul", "ol", "dl", "table", "thead", "tbody", "tfoot", "tr", "form", "fieldset", "select",
+                 "blockquote", "figure", "details", "svg"] },
+  matchTags: { bothTags: true },
+  extraKeys: {
+    "Ctrl-Enter": () => run(), "Cmd-Enter": () => run(),
+    "Ctrl-/": "toggleComment", "Cmd-/": "toggleComment",
+    Tab: (c) => c.somethingSelected() ? c.indentSelection("add") : c.replaceSelection(" ".repeat(c.getOption("indentUnit"))),
+  },
+});
+
+function docFor(key, mode, sample) {
+  if (!docs[key]) {
+    const saved = store.get("code:" + key);
+    docs[key] = CodeMirror.Doc(saved != null ? saved : sample, mode);
+    let t;
+    docs[key].on("change", () => {
+      clearTimeout(t);
+      t = setTimeout(() => store.set("code:" + key, docs[key].getValue()), 300);
+      if (current && current.id === "web") schedulePreview();
+    });
+  }
+  return docs[key];
+}
+
+// ---------------------------------------------------------------- engine choice
+function engineFor(lang) {
+  if (lang.id === "web") return "web";
+  if (lang.id === "xpp") return "none";
+  const local = server && server[lang.id] && server[lang.id].available;
+  const browser = !!lang.browser;
+  const pick = engineChoice[lang.id];
+  if (pick === "local" && local) return "local";
+  if (pick === "browser" && browser) return "browser";
+  if (local) return "local";
+  if (browser) return "browser";
+  return "none";
+}
+
+function updateStatus() {
+  const lang = current, eng = engineFor(lang), st = $("status");
+  const local = server && server[lang.id] && server[lang.id].available;
+  $("engineSeg").classList.toggle("hidden", !(local && lang.browser));
+  document.querySelectorAll("#engineSeg button").forEach(b => b.classList.toggle("on", b.dataset.engine === eng));
+  const notice = $("notice");
+  notice.classList.add("hidden");
+  $("runBtn").disabled = false;
+  if (eng === "web") { st.className = "chip ok"; st.textContent = "Live preview in browser"; }
+  else if (eng === "local") { st.className = "chip ok"; st.textContent = "Runs on this computer · " + server[lang.id].via; }
+  else if (eng === "browser") {
+    st.className = "chip ok";
+    st.textContent = { js: "Runs in browser", ts: "Runs in browser · TypeScript compiler",
+                       python: "Runs in browser · Pyodide", lua: "Runs in browser · Fengari (Lua 5.3)" }[lang.browser];
+  } else if (lang.id === "xpp") {
+    st.className = "chip warn"; st.textContent = "Edit only";
+    notice.innerHTML = "<b>X++ can't be compiled outside Microsoft Dynamics 365.</b> It has no standalone compiler — X++ is compiled by the " +
+      "Dynamics 365 Finance &amp; Operations tooling in Visual Studio against the application's metadata (AOT). " +
+      "You can write and highlight it here, then paste it into your D365 development environment to build and run.";
+    notice.classList.remove("hidden");
+    $("runBtn").disabled = true;
+  } else {
+    st.className = "chip err"; st.textContent = server ? "Not installed" : "Needs server.py";
+    const hint = server && server[lang.id] ? server[lang.id].hint : "";
+    notice.innerHTML = !server
+      ? "The local runner isn't connected, so only browser languages can run. Start it with <code>python server.py</code> and open <code>http://127.0.0.1:8765</code>."
+      : "No " + escapeHtml(lang.name) + " compiler or interpreter was found on this computer." +
+        (hint ? " Install one, then click <b>Re-scan</b>:<br><code>" + escapeHtml(hint) + "</code> " : " ") +
+        '<button id="rescanBtn" style="margin-left:6px">Re-scan</button>';
+    notice.classList.remove("hidden");
+    const rb = $("rescanBtn"); if (rb) rb.onclick = rescan;
+  }
+}
+
+// ---------------------------------------------------------------- switching
+function renderTabs() {
+  const tabs = $("tabs");
+  tabs.innerHTML = "";
+  if (current.id === "web") {
+    WEB_TABS.forEach(t => {
+      const b = document.createElement("button");
+      b.className = "tab" + (t.key === webTab ? " on" : "");
+      b.innerHTML = '<span class="fname">' + t.label + "</span>";
+      b.onclick = () => { webTab = t.key; store.set("webTab", webTab); renderTabs(); showDoc(); };
+      tabs.appendChild(b);
+    });
+  } else {
+    const b = document.createElement("button");
+    b.className = "tab on";
+    b.innerHTML = '<span class="fname">' + current.file + "</span>";
+    tabs.appendChild(b);
+  }
+}
+
+function showDoc() {
+  if (current.id === "web") {
+    const t = WEB_TABS.find(x => x.key === webTab);
+    cm.swapDoc(docFor("web-" + t.key, t.mode, WEB_SAMPLE[t.key]));
+    cm.setOption("indentUnit", 2);
+  } else {
+    cm.swapDoc(docFor(current.id, current.mode, current.sample));
+    cm.setOption("indentUnit", ["go"].includes(current.id) ? 8 : 4);
+    cm.setOption("indentWithTabs", current.id === "go");
+  }
+  cm.focus();
+}
+
+function selectLang(id) {
+  current = LANGS.find(l => l.id === id) || LANGS.find(l => l.id === "python");
+  store.set("lang", current.id);
+  $("lang").value = current.id;
+  const isWeb = current.id === "web";
+  $("preview").classList.toggle("hidden", !isWeb);
+  $("stdin").classList.toggle("hidden", isWeb);
+  $("stdinHead").classList.toggle("hidden", isWeb);
+  $("outTitle").textContent = isWeb ? "Console" : "Output";
+  $("resetBtn").disabled = current.id === "web" ? false : false;
+  const savedIn = store.get("stdin:" + current.id);
+  $("stdin").value = savedIn != null ? savedIn : (current.stdin || "");
+  renderTabs();
+  showDoc();
+  updateStatus();
+  clearOutput();
+  if (isWeb) refreshPreview();
+}
+
+function buildSelect() {
+  const sel = $("lang");
+  sel.innerHTML = "";
+  const groups = {};
+  LANGS.forEach(l => (groups[l.group] = groups[l.group] || []).push(l));
+  Object.entries(groups).forEach(([g, list]) => {
+    const og = document.createElement("optgroup");
+    og.label = g;
+    list.forEach(l => {
+      const o = document.createElement("option");
+      o.value = l.id;
+      const eng = engineFor(l);
+      o.textContent = l.name + (eng === "none"
+        ? (l.id === "xpp" ? "  — edit only" : server ? "  — not installed" : "  — needs server.py")
+        : "");
+      og.appendChild(o);
+    });
+    sel.appendChild(og);
+  });
+  if (current) sel.value = current.id;
+}
+
+// ---------------------------------------------------------------- output
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function clearOutput() { $("output").innerHTML = ""; }
+function write(text, cls) {
+  if (!text) return;
+  const out = $("output");
+  const span = document.createElement("span");
+  if (cls) span.className = cls;
+  span.textContent = text;
+  out.appendChild(span);
+  out.scrollTop = out.scrollHeight;
+}
+function finishLine(ok, seconds, extra) {
+  const msg = (ok ? "✓ Finished" : "✗ Exited with an error") + (seconds != null ? " in " + seconds + "s" : "") + (extra || "");
+  const out = $("output");
+  if (out.lastChild && !/\n$/.test(out.lastChild.textContent)) write("\n");
+  write("\n" + msg + "\n", ok ? "okline" : "stderr");
+}
+
+// ---------------------------------------------------------------- run
+async function run() {
+  if (running || !current) return;
+  if (current.id === "web") { clearOutput(); refreshPreview(); return; }
+  const eng = engineFor(current);
+  if (eng === "none") return;
+  const code = cm.getValue();
+  const stdin = $("stdin").value;
+  store.set("stdin:" + current.id, stdin);
+  clearOutput();
+  setRunning(true);
+  try {
+    if (eng === "local") await runLocal(code, stdin);
+    else await runBrowser(current.browser, code, stdin);
+  } finally { setRunning(false); }
+}
+
+function setRunning(on) {
+  running = on;
+  const b = $("runBtn");
+  b.textContent = on ? "■ Stop" : "▶ Run";
+  b.classList.toggle("primary", true);
+  b.onclick = on ? stop : run;
+}
+function stop() {
+  Object.keys(workers).forEach(k => { workers[k].w.terminate(); workers[k].reject && workers[k].reject("stopped"); delete workers[k]; });
+}
+
+async function runLocal(code, stdin) {
+  write("Running with " + server[current.id].via + "…\n", "info");
+  let res;
+  try {
+    const r = await fetch("/api/run", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-PolyRun": "1" },
+      body: JSON.stringify({ lang: current.id, code, stdin }),
+    });
+    res = await r.json();
+  } catch (e) {
+    write("Lost connection to the local runner. Is server.py still running?\n", "stderr");
+    return;
+  }
+  clearOutput();
+  if (res.error) { write(res.error + "\n" + (res.hint ? "Install: " + res.hint + "\n" : ""), "stderr"); return; }
+  if (res.compile) {
+    const c = res.compile;
+    if (c.timeout) { write("Compile timed out.\n", "stderr"); }
+    if (c.code !== 0 || c.timeout) {
+      write(c.stdout, "stderr"); write(c.stderr, "stderr");
+      finishLine(false, c.time, " (compile failed)");
+      return;
+    }
+    if ((c.stdout + c.stderr).trim()) write(c.stdout + c.stderr + "\n", "info");
+  }
+  const r = res.run;
+  write(r.stdout); write(r.stderr, "stderr");
+  if (r.timeout) finishLine(false, null, " — stopped after the time limit");
+  else finishLine(r.code === 0, r.time, r.code !== 0 ? " (exit code " + r.code + ")" : "");
+}
+
+// ---------------------------------------------------------------- browser runtimes
+const WORKER_SRC = `
+const URLS = ${JSON.stringify(URLS)};
+let lines = [], li = 0;
+self.__polyrun_readline = () => (li < lines.length ? lines[li++] : undefined);
+const out = (text, stream) => postMessage({ type: "out", text, stream });
+const fmt = (args) => args.map(x => {
+  if (typeof x === "string") return x;
+  if (x instanceof Error) return x.stack || String(x);
+  try { const s = JSON.stringify(x); return s === undefined ? String(x) : s; } catch (e) { return String(x); }
+}).join(" ");
+console.log = console.info = console.debug = (...a) => out(fmt(a) + "\\n", "stdout");
+console.warn = console.error = (...a) => out(fmt(a) + "\\n", "stderr");
+self.readline = self.prompt = () => { const l = self.__polyrun_readline(); return l === undefined ? null : l; };
+let pyodide = null, tsLoaded = false, luaLoaded = false;
+const AsyncFunction = (async () => {}).constructor;
+
+onmessage = async (e) => {
+  const { kind, code, stdin } = e.data;
+  lines = stdin.length ? stdin.replace(/\\r/g, "").split("\\n") : [];
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  li = 0;
+  try {
+    if (kind === "js" || kind === "ts") {
+      let js = code;
+      if (kind === "ts") {
+        if (!tsLoaded) { postMessage({ type: "loading", text: "Loading TypeScript compiler…" }); importScripts(URLS.ts); tsLoaded = true; }
+        js = ts.transpile(code, { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.None });
+      }
+      postMessage({ type: "started" });
+      await new AsyncFunction(js)();
+    } else if (kind === "python") {
+      if (!pyodide) {
+        postMessage({ type: "loading", text: "Loading Python (Pyodide), first run takes a few seconds…" });
+        importScripts(URLS.pyodide + "pyodide.js");
+        pyodide = await loadPyodide({ indexURL: URLS.pyodide });
+      }
+      pyodide.setStdout({ batched: (s) => out(s + "\\n", "stdout") });
+      pyodide.setStderr({ batched: (s) => out(s + "\\n", "stderr") });
+      pyodide.setStdin({ stdin: () => { const l = self.__polyrun_readline(); return l === undefined ? null : l; } });
+      postMessage({ type: "started" });
+      const globals = pyodide.toPy({ __name__: "__main__" });
+      try { await pyodide.runPythonAsync(code, { globals, filename: "main.py" }); }
+      finally { globals.destroy(); }
+    } else if (kind === "lua") {
+      if (!luaLoaded) {
+        postMessage({ type: "loading", text: "Loading Lua (Fengari)…" });
+        self.window = self;  // fengari-web expects a window global
+        importScripts(URLS.fengari); luaLoaded = true;
+        self.__polyrun_write = (s) => out(String(s), "stdout");
+        fengari.load('local js = require "js"; local g = js.global; io = io or {}; ' +
+          'io.write = function(...) for i = 1, select("#", ...) do g:__polyrun_write(tostring((select(i, ...)))) end; return io end; ' +
+          'io.read = function(fmt) local l = g:__polyrun_readline(); if l == nil then return nil end; ' +
+          'if fmt == "n" or fmt == "*n" or fmt == "*number" then return tonumber(l) end; return l end; ' +
+          'io.lines = function() return function() return io.read() end end')();
+      }
+      postMessage({ type: "started" });
+      fengari.load(code, "=main.lua")();
+    }
+    postMessage({ type: "done", ok: true });
+  } catch (err) {
+    const msg = err && (err.message || (err.toString && err.toString())) || String(err);
+    out(msg + "\\n", "stderr");
+    postMessage({ type: "done", ok: false });
+  }
+};`;
+const workerUrl = URL.createObjectURL(new Blob([WORKER_SRC], { type: "text/javascript" }));
+
+function runBrowser(kind, code, stdin) {
+  return new Promise((resolve) => {
+    let entry = workers[kind];
+    if (!entry) { entry = workers[kind] = { w: new Worker(workerUrl) }; }
+    const w = entry.w;
+    let timer = null, start = 0, loadingShown = false;
+    const kill = (reason) => {
+      w.terminate(); delete workers[kind]; clearTimeout(timer);
+      finishLine(false, null, reason);
+      resolve();
+    };
+    entry.reject = () => kill(" — stopped");
+    w.onerror = (ev) => { ev.preventDefault(); write((ev.message || "Worker error") + "\n", "stderr"); kill(""); };
+    w.onmessage = (ev) => {
+      const m = ev.data;
+      if (m.type === "loading") { loadingShown = true; write(m.text + "\n", "info"); }
+      else if (m.type === "started") {
+        if (loadingShown) clearOutput();
+        start = performance.now();
+        timer = setTimeout(() => kill(" — stopped after " + BROWSER_TIMEOUT_MS / 1000 + "s (infinite loop?)"), BROWSER_TIMEOUT_MS);
+      } else if (m.type === "out") write(m.text, m.stream === "stderr" ? "stderr" : "");
+      else if (m.type === "done") {
+        clearTimeout(timer); entry.reject = null;
+        finishLine(m.ok, ((performance.now() - start) / 1000).toFixed(3));
+        resolve();
+      }
+    };
+    w.postMessage({ kind, code, stdin });
+  });
+}
+
+// ---------------------------------------------------------------- web preview
+let previewTimer;
+function schedulePreview() { clearTimeout(previewTimer); previewTimer = setTimeout(refreshPreview, 500); }
+function refreshPreview() {
+  const get = (k) => docFor("web-" + k, null, WEB_SAMPLE[k]).getValue();
+  const bridge = `<script>(function(){var send=function(level,args){try{parent.postMessage({polyrun:1,level:level,text:Array.prototype.map.call(args,function(x){if(typeof x==="string")return x;try{return JSON.stringify(x)}catch(e){return String(x)}}).join(" ")},"*")}catch(e){}};
+["log","info","warn","error","debug"].forEach(function(l){var o=console[l];console[l]=function(){send(l,arguments);o&&o.apply(console,arguments)}});
+window.addEventListener("error",function(e){send("error",[e.message+" (line "+e.lineno+")"])});})();<\/script>`;
+  let html = get("html");
+  const css = "<style>\n" + get("css") + "\n</style>";
+  const js = "<script>\n" + get("js").replace(/<\/script/gi, "<\\/script") + "\n<\/script>";
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + bridge + css) : bridge + css + html;
+  html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, js + "</body>") : html + js;
+  clearOutput();
+  $("preview").srcdoc = html;
+}
+window.addEventListener("message", (e) => {
+  if (e.source !== $("preview").contentWindow || !e.data || !e.data.polyrun) return;
+  write(e.data.text + "\n", e.data.level === "error" || e.data.level === "warn" ? "stderr" : "");
+});
+
+// ---------------------------------------------------------------- server
+function applyServer(list) {
+  server = {};
+  list.forEach(l => (server[l.id] = l));
+}
+async function rescan() {
+  try {
+    const r = await fetch("/api/redetect", { method: "POST", headers: { "X-PolyRun": "1" } });
+    applyServer((await r.json()).languages);
+  } catch {}
+  buildSelect(); updateStatus();
+}
+
+// ---------------------------------------------------------------- wire up
+$("lang").onchange = (e) => selectLang(e.target.value);
+$("runBtn").onclick = run;
+$("clearBtn").onclick = clearOutput;
+$("resetBtn").onclick = () => {
+  if (current.id === "web") docFor("web-" + webTab).setValue(WEB_SAMPLE[webTab]);
+  else docFor(current.id).setValue(current.sample);
+};
+$("stdin").addEventListener("input", () => store.set("stdin:" + current.id, $("stdin").value));
+$("stdin").addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); } });
+document.querySelectorAll("#engineSeg button").forEach(b => b.onclick = () => {
+  engineChoice[current.id] = b.dataset.engine; updateStatus();
+});
+
+(async function init() {
+  webTab = store.get("webTab") || "html";
+  if (location.protocol.startsWith("http")) {
+    try {
+      const r = await fetch("/api/languages");
+      if (r.ok) applyServer((await r.json()).languages);
+    } catch {}
+  }
+  buildSelect();
+  selectLang(store.get("lang") || "python");
+})();
+</script>
+</body>
+</html>
